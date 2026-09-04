@@ -1,33 +1,74 @@
 # Local Loop — Smart Local Commerce Agent
 
+## One-line pitch
+
+Local Loop is a live Shopify storefront where a shopper and a browser agent build the same cart together through WebMCP, while the shopper remains in control of checkout.
+
 ## Inspiration
-Small storefronts lose customers to friction: shoppers know roughly what they want ("skincare under $25"), but translating that into clicks, filters, and cart actions is busywork. AI agents in the browser can do that work — if the site speaks their language. WebMCP is that language.
+
+Online shopping contains a lot of repetitive work: searching the catalog, comparing prices, checking stock, and creating a cart. Browser agents can make those tasks easier, but only if a site gives them clear, reliable actions instead of forcing them to guess how to use its interface.
+
+I wanted to show an agent-native commerce experience where automation does not take control away from the shopper. The shopper should see every cart change, approve the selected products, and make the final purchase decision in Shopify.
 
 ## What it does
-Local Loop is a live storefront where the inventory itself is agent-accessible. It registers two WebMCP tools directly in the page:
 
-- **`search_inventory`** (read) — query by keywords, category, max price, and stock availability against live inventory
-- **`add_to_cart`** (write) — add any item by ID with quantity, with real stock validation
+Local Loop connects a live Shopify catalog and cart to seven WebMCP tools. A browser agent can search live products, add and remove Shopify variants, inspect the cart, and prepare a shopping list. The shopper sees those changes immediately in the same storefront.
 
-A shopper can tell their browser agent "find skincare under $25 and add two to my cart" — the agent calls the tools, and the human watches the results appear on screen: filtered products, an updated cart, and an "Agent Activity" panel narrating every action in real time.
+The checkout flow is intentionally human-controlled. An agent can prepare the cart, but the shopper completes a short Cloudflare Turnstile verification and explicitly confirms before Local Loop opens Shopify Checkout. Local Loop never receives payment information.
 
 ## Why WebMCP fits this use case
-Commerce is the perfect WebMCP shape: the *data* is live (stock changes every 15 seconds via polling), and the *actions* are stateful (the cart lives in the page's React state). A scraper or a server-side API can't do this — the agent needs to act inside the same session the human is looking at. WebMCP lets the agent and the shopper share one cart, one inventory snapshot, one screen.
 
-## What people + agents can do together that wasn't possible
-The human sets intent; the agent executes; both see the same UI update instantly. The shopper never leaves the page, never fills a filter form, and can override the agent at any point by clicking — because the agent's tools and the page's buttons call the exact same functions. There's no "agent mode" — it's one storefront, dual-driven.
+Commerce actions are live and stateful: inventory changes, a cart belongs to a browser session, and checkout needs a clear human decision. WebMCP makes those actions discoverable and schema-validated for an agent. Instead of scraping the page or guessing which controls to use, an agent receives tools such as `search_inventory` and `add_to_cart` with explicit inputs and results.
 
-## How we built it
-- **Next.js 15 (App Router) + React 19 + Tailwind 4**
-- **`@webmcp-registry/kit`** — tool contracts defined with **Zod** schemas in `app/commerce.tools.ts` (`defineToolContract`), registered from the page component via the `useWebMCPTool` React hook, which wires them into `modelContext` (the WebMCP browser API)
-- **Live inventory**: a serverless `/api/inventory` route proxies DummyJSON with no-cache fetches and simulated stock drift; the client polls every 15s
-- Tool handlers are the same callbacks the visible UI uses, so agent actions and human clicks are always consistent — including stock-limit validation and low-stock states
+The important result is a shared workflow. A shopper can ask for a budget-conscious shopping list, let the agent find matching live products, and review the exact same Shopify cart before it changes hands to Shopify Checkout.
 
-## Challenges
-Keeping tool results and visible UI perfectly in sync — solved by making the WebMCP handlers *be* the UI handlers, not parallel code paths. Also designing tool schemas descriptive enough that an agent picks the right filters on the first call.
+## What people and agents can do together that was difficult before
+
+The shopper provides intent and remains the decision-maker. The agent handles catalog discovery and cart preparation. Both work in the same browser session and see the same cart state, without a separate agent dashboard, a scraped catalog, or a disconnected checkout flow.
+
+## How I built it
+
+- **Next.js 16, React 19, TypeScript, and Tailwind CSS** power the storefront.
+- **`@webmcp-registry/kit` and Zod** define and register seven structured WebMCP tools from the page.
+- **Shopify Storefront API and Cart API** provide live products, stock, cart state, and Shopify's secure checkout URL.
+- **Cloudflare Turnstile** is validated server-side before checkout. A signed, five-minute browser verification lets the same shopper or browser agent prepare checkout after the human check.
+- **Vercel** hosts the production app and provides Web Analytics.
+
+## Challenges I ran into
+
+The main challenge was keeping browser-agent actions and visible UI state perfectly aligned. I solved this by making the WebMCP tool handlers use the same cart and inventory functions as the storefront itself, rather than building separate agent-only code paths.
+
+The other challenge was preserving shopper control at checkout. The final design keeps payment inside Shopify and adds a server-verified human check before the checkout URL can be created. Agents can help prepare the order, but they cannot silently move a shopper into payment.
+
+## Accomplishments that I'm proud of
+
+- A real Shopify-backed cart rather than mock product data.
+- Seven working WebMCP tools that appear in a compatible browser inspector.
+- Shopping List Mode, where a shopper can review live matches before allowing bulk cart changes.
+- A checkout flow that combines explicit confirmation, server-side bot protection, and Shopify's secure payment experience.
+- A public, deployed project with a short narrated demo and clear local setup instructions.
+
+## What I learned
+
+I learned how WebMCP changes the design of a web app: instead of treating agents as external scrapers, the app can deliberately expose safe, descriptive capabilities. I also learned how to coordinate browser state, server-side Shopify calls, secure cookies, and a human approval boundary in one user experience.
 
 ## What's next
-Checkout and order-status tools, per-store inventory adapters so any local shop can plug in, and multi-item "shopping list" fulfilment in a single agent call.
 
-## Try it
-Open the live URL in Chrome 149+ with `chrome://flags/#enable-webmcp-testing` enabled, then ask your agent: *"Find skincare under $25 and add two to my cart."*
+- Add Shopify webhooks for faster inventory updates.
+- Add customer accounts and secure order-history retrieval where a merchant approves it.
+- Add audit events and merchant controls for agent activity.
+- Add broader accessibility, privacy, and operations review before using the project for real customer orders.
+
+## Links
+
+- Live app: <https://web-mcp-mu.vercel.app/>
+- Demo video: <https://youtu.be/ER8LuhkWXhM>
+- Source repository: <https://github.com/Saurabhkaran11/web-mcp>
+
+## Judge testing instructions
+
+1. Open the live URL in ChatGPT's in-app browser, or Google Chrome with `chrome://flags/#enable-webmcp-testing` enabled.
+2. Open the WebMCP inspector and confirm all seven tools are visible.
+3. Call `search_inventory`, `add_to_cart`, and `get_cart` using an ID returned from search.
+4. For checkout, complete the visible **Protected checkout** human check in the same browser session, then call `checkout` with `confirm: true` or use the visible button.
+5. Shopify Checkout opens for final review. Do not enter payment information for this demo.

@@ -8,7 +8,7 @@ export const searchInventoryContract = defineToolContract({
   input: z.object({
     query: z.string().optional().describe("Words to match in the product name or description."),
     category: z.string().optional().describe("Product category such as beauty, groceries, or furniture."),
-    max_price: z.number().optional().describe("Maximum item price in US dollars."),
+    max_price: z.number().optional().describe("Maximum item price in the store's displayed currency."),
     availability: z.enum(["in_stock", "low_stock", "all"]).optional().describe("Whether to show available, low-stock, or all items."),
   }),
 });
@@ -68,7 +68,7 @@ export const fulfillShoppingListContract = defineToolContract({
     items: z.array(z.object({
       query: z.string().describe("Words describing the wanted product, e.g. 'lipstick' or 'honey'."),
       quantity: z.number().int().min(1).max(20).optional().describe("Units wanted. Defaults to 1."),
-      max_price: z.number().optional().describe("Skip matches above this unit price in US dollars."),
+      max_price: z.number().optional().describe("Skip matches above this unit price in the store's displayed currency."),
     })).min(1).max(10).describe("The shopping list entries to fulfil."),
   }),
 });
