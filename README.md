@@ -6,7 +6,7 @@
 
 Local Loop makes online shopping simpler. Instead of clicking through filters and product pages, a browser agent can search the shop, add items to the same cart you see, and prepare Shopify Checkout. You stay in control of every purchase.
 
-> **Demo video:** coming soon. It will show product search, cart updates, and the safe Shopify checkout handoff in under 90 seconds.
+> **Demo video:** [Local Loop](https://youtu.be/ER8LuhkWXhM)
 
 ## What you can do
 
