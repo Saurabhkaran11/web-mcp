@@ -2,6 +2,11 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isShopifyConfigured, shopifyRequest } from "../../lib/shopify";
+import {
+  hasCheckoutVerification,
+  isTurnstileConfigured,
+  TURNSTILE_VERIFICATION_COOKIE,
+} from "../../lib/turnstile";
 
 const CART_COOKIE = "local-loop-shopify-cart";
 
@@ -151,6 +156,19 @@ export async function POST(request: NextRequest) {
       if (!cartId) return NextResponse.json({ error: "Your cart is empty." }, { status: 422 });
       const cart = await fetchCart(cartId, ip);
       if (!cart?.totalQuantity) return NextResponse.json({ error: "Your cart is empty." }, { status: 422 });
+      if (!isTurnstileConfigured()) {
+        return NextResponse.json(
+          { error: "Checkout protection is not configured yet." },
+          { status: 503 },
+        );
+      }
+      const verification = (await cookies()).get(TURNSTILE_VERIFICATION_COOKIE)?.value;
+      if (!hasCheckoutVerification(verification)) {
+        return NextResponse.json(
+          { error: "Complete the human check in Local Loop before requesting checkout." },
+          { status: 403 },
+        );
+      }
       return responseForCart(cart);
     }
 

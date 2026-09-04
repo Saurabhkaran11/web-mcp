@@ -13,6 +13,9 @@ import {
   removeFromCartContract,
   searchInventoryContract,
 } from "./commerce.tools";
+import { TurnstileChallenge } from "./components/turnstile-challenge";
+
+const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 type Product = {
   id: string;
@@ -170,6 +173,11 @@ export default function Home() {
   const [shoppingListInput, setShoppingListInput] = useState("");
   const [shoppingListPlan, setShoppingListPlan] = useState<ShoppingListPlan | null>(null);
   const [shoppingListBusy, setShoppingListBusy] = useState(false);
+  const [checkoutVerified, setCheckoutVerified] = useState(false);
+  const [checkoutVerificationBusy, setCheckoutVerificationBusy] = useState(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutMessage, setCheckoutMessage] = useState("");
+  const [turnstileKey, setTurnstileKey] = useState(0);
 
   const refreshInventory = useCallback(async () => {
     try {
@@ -420,12 +428,60 @@ export default function Home() {
     [updateCart],
   );
 
+  const resetCheckoutVerification = useCallback((message: string) => {
+    setCheckoutVerified(false);
+    setCheckoutVerificationBusy(false);
+    setCheckoutMessage(message);
+    setTurnstileKey((current) => current + 1);
+  }, []);
+
+  const verifyCheckoutChallenge = useCallback(async (token: string) => {
+    setCheckoutVerificationBusy(true);
+    setCheckoutVerified(false);
+    setCheckoutMessage("Checking your verification…");
+
+    try {
+      const response = await fetch("/api/turnstile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const payload = (await response.json()) as { success?: boolean; error?: string };
+      if (!response.ok || !payload.success) {
+        resetCheckoutVerification(
+          payload.error ?? "Verification could not be confirmed. Please try again.",
+        );
+        return;
+      }
+
+      setCheckoutVerified(true);
+      setCheckoutMessage("Human check complete. Your protected checkout is ready.");
+    } catch {
+      resetCheckoutVerification("Verification could not be confirmed. Please try again.");
+    } finally {
+      setCheckoutVerificationBusy(false);
+    }
+  }, [resetCheckoutVerification]);
+
   const beginCheckout = useCallback(async () => {
+    if (!checkoutVerified) {
+      setCheckoutMessage("Complete the quick human check before continuing to Shopify.");
+      return;
+    }
+
+    setCheckoutBusy(true);
     const result = await checkout({ confirm: true });
     if (result.success && typeof result.checkout_url === "string") {
       window.location.assign(result.checkout_url);
+      return;
     }
-  }, [checkout]);
+    resetCheckoutVerification(
+      "message" in result
+        ? (result.message ?? "Checkout could not be prepared. Please try again.")
+        : "Checkout could not be prepared. Please try again.",
+    );
+    setCheckoutBusy(false);
+  }, [checkout, checkoutVerified, resetCheckoutVerification]);
 
   const getOrderStatus = useCallback(
     ({ order_id }: { order_id?: string }) => ({
@@ -1046,12 +1102,51 @@ export default function Home() {
           </div>
 
           {cartItemCount ? (
-            <button
-              onClick={() => void beginCheckout()}
-              className="mt-4 w-full rounded-full bg-[#e15b35] py-3 text-sm font-bold text-white transition hover:bg-[#174b36]"
-            >
-              Continue to Shopify Checkout · {money(cartTotal, cartCurrency)}
-            </button>
+            <div className="mt-4 rounded-2xl border border-[#174b36]/10 bg-[#f8f7f2] p-4">
+              <p className="text-xs font-bold uppercase tracking-widest text-[#e15b35]">
+                Protected checkout
+              </p>
+              <p className="mt-1 text-xs leading-5 text-[#174b36]/60">
+                Complete this quick human check before opening Shopify Checkout. It keeps bots
+                from creating checkout sessions.
+              </p>
+
+              {turnstileSiteKey ? (
+                <div className="mt-3 overflow-hidden">
+                  <TurnstileChallenge
+                    key={turnstileKey}
+                    siteKey={turnstileSiteKey}
+                    onSuccess={(token) => void verifyCheckoutChallenge(token)}
+                    onExpired={() =>
+                      resetCheckoutVerification("Verification expired. Please complete it again.")
+                    }
+                    onError={() =>
+                      resetCheckoutVerification("Verification could not load. Please try again.")
+                    }
+                  />
+                </div>
+              ) : (
+                <p className="mt-3 text-xs font-medium text-[#a03b20]">
+                  Checkout protection is not configured yet.
+                </p>
+              )}
+
+              {checkoutMessage ? (
+                <p className="mt-3 text-xs font-medium text-[#174b36]/75" role="status">
+                  {checkoutMessage}
+                </p>
+              ) : null}
+
+              <button
+                onClick={() => void beginCheckout()}
+                disabled={!turnstileSiteKey || !checkoutVerified || checkoutVerificationBusy || checkoutBusy}
+                className="mt-4 w-full rounded-full bg-[#e15b35] py-3 text-sm font-bold text-white transition hover:bg-[#174b36] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {checkoutBusy
+                  ? "Opening Shopify Checkout…"
+                  : `Continue to Shopify Checkout · ${money(cartTotal, cartCurrency)}`}
+              </button>
+            </div>
           ) : null}
           <p className="mt-3 text-xs leading-5 text-[#174b36]/50">
             An agent can prepare the cart. Shopify Checkout always gives you the final review

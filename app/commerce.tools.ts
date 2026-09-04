@@ -44,7 +44,7 @@ export const removeFromCartContract = defineToolContract({
 
 export const checkoutContract = defineToolContract({
   name: "checkout",
-  description: "Prepare a Shopify Checkout link for everything in the cart. Requires explicit confirmation and never submits a payment.",
+  description: "Prepare a Shopify Checkout link for everything in the cart. Requires explicit confirmation and a short-lived human verification completed on the visible Local Loop page; never submits a payment.",
   kind: "write",
   input: z.object({
     confirm: z.literal(true).describe("Must be true. Only pass after the shopper has approved the cart contents and total."),

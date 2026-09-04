@@ -15,6 +15,7 @@ Local Loop makes online shopping simpler. Instead of clicking through filters an
 - Let the agent add items to the same cart shown on screen.
 - Build a shopping list, review live matches, then approve what goes into the cart.
 - Review the cart yourself before opening Shopify Checkout.
+- Complete a brief human check before a checkout link can be created.
 - Pay only through Shopify. Local Loop never takes payment details.
 
 For example, an agent can find a face mask under $20, add it to the cart, and show the new total. The shopper can see every change and remove an item at any time.
@@ -64,6 +65,8 @@ Shopper or browser agent
 
 The app keeps the Shopify private access token on the server. It is never sent to the browser or exposed through a WebMCP tool.
 
+Before checkout, Cloudflare Turnstile verifies that a person is present. The verification is confirmed on the server and gives the current browser a short-lived, signed checkout session. This lets an agent prepare the cart, while keeping the final checkout handoff under the shopper's control.
+
 ## Testing proof
 
 Local Loop has been tested on the public Vercel deployment with live Shopify data.
@@ -72,12 +75,14 @@ Local Loop has been tested on the public Vercel deployment with live Shopify dat
 - A browser agent can search inventory, add an item, and read the shared cart.
 - The WebMCP Inspector shows all seven tools on the live site.
 - Checkout creates a Shopify review link only after explicit confirmation. No payment is collected by Local Loop.
+- Checkout requires a server-verified Cloudflare Turnstile check from the same browser.
 
 ## Built with
 
 - Next.js, React, TypeScript, and Tailwind CSS
 - WebMCP with Zod-validated tool inputs
 - Shopify Storefront API and Cart API
+- Cloudflare Turnstile for free checkout bot protection
 - Vercel for public hosting
 
 ## Run it locally
@@ -94,6 +99,8 @@ Local Loop has been tested on the public Vercel deployment with live Shopify dat
    SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
    SHOPIFY_STOREFRONT_PRIVATE_ACCESS_TOKEN=your-private-storefront-token
    SHOPIFY_STOREFRONT_API_VERSION=2026-07
+   NEXT_PUBLIC_TURNSTILE_SITE_KEY=your-cloudflare-turnstile-site-key
+   TURNSTILE_SECRET_KEY=your-cloudflare-turnstile-secret-key
    ```
 
 3. Start the app:
@@ -108,7 +115,7 @@ Keep `.env.local` private. It is ignored by Git and must never be committed.
 
 ## Before sharing your own deployment
 
-- Add the three Shopify variables as private environment variables in your hosting provider.
+- Add the three Shopify variables and two Turnstile variables as environment variables in your hosting provider. Only `NEXT_PUBLIC_TURNSTILE_SITE_KEY` may be public; keep the Turnstile secret private.
 - Test the live catalog, cart, and checkout handoff.
 - Confirm all seven WebMCP tools appear in a WebMCP-enabled browser.
 - Never share a Shopify private token or a full checkout URL.
