@@ -6,7 +6,7 @@
 
 Local Loop makes online shopping simpler. Instead of clicking through filters and product pages, a browser agent can search the shop, add items to the same cart you see, and prepare Shopify Checkout. You stay in control of every purchase.
 
-> **Demo video:** [Local Loop](https://youtu.be/ER8LuhkWXhM)
+> **Demo video:** [▶ Watch the 90-second Local Loop demo on YouTube](https://youtu.be/ER8LuhkWXhM)
 
 ## What you can do
 
@@ -60,6 +60,15 @@ Shopper or browser agent
 ```
 
 The app keeps the Shopify private access token on the server. It is never sent to the browser or exposed through a WebMCP tool.
+
+## Testing proof
+
+Local Loop has been tested on the public Vercel deployment with live Shopify data.
+
+- The public catalog loads real Shopify products, prices, and stock.
+- A browser agent can search inventory, add an item, and read the shared cart.
+- The WebMCP Inspector shows all seven tools on the live site.
+- Checkout creates a Shopify review link only after explicit confirmation. No payment is collected by Local Loop.
 
 ## Built with
 
