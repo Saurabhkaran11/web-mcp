@@ -109,9 +109,15 @@ function makeShoppingListPlan(
   const additions: Array<{ variantId: string; quantity: number }> = [];
   const results = items.map(({ query, quantity = 1, max_price }) => {
     const wanted = query.toLowerCase();
+    const wantedWords = wanted.split(/[^a-z0-9]+/).filter(Boolean);
     const match = products.reduce<Product | undefined>((best, product) => {
+      const productText = `${product.title} ${product.description}`.toLowerCase();
       const matches =
-        `${product.title} ${product.description}`.toLowerCase().includes(wanted) &&
+        wantedWords.every(
+          (word) =>
+            productText.includes(word) ||
+            (word.endsWith("s") && productText.includes(word.slice(0, -1))),
+        ) &&
         (max_price === undefined || product.price <= max_price) &&
         product.stock >=
           (cart[product.id] ?? 0) + (plannedQuantities.get(product.id) ?? 0) + quantity;
