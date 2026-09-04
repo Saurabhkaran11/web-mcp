@@ -94,6 +94,7 @@ This is why a human click and an agent tool call result in the same Shopify-cart
 - **No payment collection:** Local Loop never asks for, stores, or processes payment details.
 - **Explicit checkout:** The WebMCP checkout tool requires `confirm: true`; the final order and payment decision happen in Shopify.
 - **Bot protection:** Cloudflare Turnstile is validated server-side. A signed, five-minute browser verification is required before a checkout URL is released.
+- **Baseline abuse guard:** Catalog, cart, and verification routes are request-limited on active server instances. A high-traffic merchant should use a shared, durable limiter.
 - **Private credentials:** Shopify and Turnstile secret keys stay on the server. Only the Turnstile site key is intentionally public in the browser.
 
 ## How it is built

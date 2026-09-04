@@ -22,6 +22,7 @@ type Product = {
   title: string;
   description: string;
   price: number;
+  currency: string;
   stock: number;
   brand: string;
   category: string;
@@ -30,7 +31,7 @@ type Product = {
 };
 
 type Cart = Record<string, number>;
-type InventorySource = "shopify" | "built-in-demo";
+type InventorySource = "shopify" | "built-in-demo" | "unavailable";
 type CartSnapshot = {
   total: number;
   currency: string;
@@ -54,7 +55,7 @@ type ShoppingListResult =
   | {
       query: string;
       matched: true;
-      item: { id: string; title: string; price: number; quantity: number };
+      item: { id: string; title: string; price: number; currency: string; quantity: number };
     }
   | { query: string; matched: false; message: string };
 type ShoppingListPlan = {
@@ -144,7 +145,13 @@ function makeShoppingListPlan(
     return {
       query,
       matched: true as const,
-      item: { id: match.id, title: match.title, price: match.price, quantity },
+      item: {
+        id: match.id,
+        title: match.title,
+        price: match.price,
+        currency: match.currency,
+        quantity,
+      },
     };
   });
 
@@ -182,16 +189,27 @@ export default function Home() {
   const refreshInventory = useCallback(async () => {
     try {
       const response = await fetch("/api/inventory", { cache: "no-store" });
-      if (!response.ok) throw new Error("Inventory is unavailable");
-
       const data = (await response.json()) as {
-        products: Product[];
-        source: InventorySource;
-        updatedAt: string;
+        products?: Product[];
+        source?: InventorySource;
+        updatedAt?: string;
+        error?: string;
       };
+      if (data.source === "unavailable") {
+        setProducts([]);
+        setInventorySource(data.source);
+        if (data.updatedAt) setUpdatedAt(new Date(data.updatedAt));
+        setInventoryStatus("error");
+        setAgentMessage(data.error ?? "Live Shopify inventory is temporarily unavailable.");
+        return;
+      }
+      if (!response.ok || !data.products || !data.source || !data.updatedAt) {
+        throw new Error(data.error ?? "Inventory is unavailable");
+      }
       setProducts(data.products);
       setInventorySource(data.source);
       setUpdatedAt(new Date(data.updatedAt));
+      setCartCurrency(data.products[0]?.currency ?? "USD");
       setInventoryStatus(data.source === "shopify" ? "ready" : "fallback");
     } catch {
       setInventoryStatus("error");
@@ -244,13 +262,19 @@ export default function Home() {
   );
 
   useEffect(() => {
-    void refreshInventory();
+    const initialRefresh = window.setTimeout(() => void refreshInventory(), 0);
     const timer = window.setInterval(() => void refreshInventory(), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(timer);
+    };
   }, [refreshInventory]);
 
   useEffect(() => {
-    void refreshCart().catch(() => undefined);
+    const initialRefresh = window.setTimeout(() => {
+      void refreshCart().catch(() => undefined);
+    }, 0);
+    return () => window.clearTimeout(initialRefresh);
   }, [refreshCart]);
 
   const searchInventory = useCallback(
@@ -265,6 +289,12 @@ export default function Home() {
       max_price?: number;
       availability?: "in_stock" | "low_stock" | "all";
     }) => {
+      if (inventoryStatus === "error") {
+        return {
+          items: [],
+          message: "Live Shopify inventory is temporarily unavailable. Please try again shortly.",
+        };
+      }
       if (!products.length) {
         return {
           items: [],
@@ -297,17 +327,18 @@ export default function Home() {
         } inventory.`,
       );
       return {
-        items: filtered.map(({ id, title, variant_title, price, stock, category }) => ({
+        items: filtered.map(({ id, title, variant_title, price, currency, stock, category }) => ({
           id,
           title,
           variant_title,
           price,
+          currency,
           stock,
           category,
         })),
       };
     },
-    [inventorySource, products],
+    [inventorySource, inventoryStatus, products],
   );
 
   const addToCart = useCallback(
@@ -319,7 +350,10 @@ export default function Home() {
       if (inventorySource !== "shopify") {
         return {
           success: false,
-          message: "Shopify credentials are not connected yet, so carts are unavailable.",
+          message:
+            inventorySource === "unavailable"
+              ? "Live Shopify inventory is temporarily unavailable, so carts are unavailable."
+              : "Shopify credentials are not connected yet, so carts are unavailable.",
         };
       }
 
@@ -351,7 +385,10 @@ export default function Home() {
       return {
         items: [],
         total: 0,
-        message: "Shopify credentials are not connected yet.",
+        message:
+          inventorySource === "unavailable"
+            ? "Live Shopify inventory is temporarily unavailable."
+            : "Shopify credentials are not connected yet.",
       };
     }
 
@@ -509,7 +546,10 @@ export default function Home() {
           results: [],
           matched: 0,
           unmatched: items.length,
-          message: "Inventory is still syncing. Please try again shortly.",
+          message:
+            inventoryStatus === "error"
+              ? "Live Shopify inventory is temporarily unavailable."
+              : "Inventory is still syncing. Please try again shortly.",
         };
       }
       if (inventorySource !== "shopify") {
@@ -517,7 +557,10 @@ export default function Home() {
           results: [],
           matched: 0,
           unmatched: items.length,
-          message: "Shopify credentials are not connected yet.",
+          message:
+            inventorySource === "unavailable"
+              ? "Live Shopify inventory is temporarily unavailable."
+              : "Shopify credentials are not connected yet.",
         };
       }
 
@@ -549,7 +592,7 @@ export default function Home() {
         };
       }
     },
-    [buildShoppingListPlan, inventorySource, products.length, updateCart],
+    [buildShoppingListPlan, inventorySource, inventoryStatus, products.length, updateCart],
   );
 
   const previewShoppingList = useCallback(() => {
@@ -562,7 +605,11 @@ export default function Home() {
       return;
     }
     if (!products.length) {
-      setAgentMessage("Inventory is still syncing. Please try again shortly.");
+      setAgentMessage(
+        inventoryStatus === "error"
+          ? "Live Shopify inventory is temporarily unavailable."
+          : "Inventory is still syncing. Please try again shortly.",
+      );
       return;
     }
 
@@ -575,7 +622,7 @@ export default function Home() {
           } below. Nothing has been added yet.`
         : "No live Shopify matches were found for that list.",
     );
-  }, [buildShoppingListPlan, products.length, shoppingListInput]);
+  }, [buildShoppingListPlan, inventoryStatus, products.length, shoppingListInput]);
 
   const approveShoppingList = useCallback(async () => {
     if (!shoppingListPlan?.additions.length) return;
@@ -947,7 +994,7 @@ export default function Home() {
                         }
                       >
                         {result.matched
-                          ? `${money(result.item.price, cartCurrency)} each`
+                          ? `${money(result.item.price, result.item.currency)} each`
                           : result.message}
                       </span>
                     </li>
@@ -1036,7 +1083,7 @@ export default function Home() {
                         ) : null}
                       </div>
                       <span className="text-lg font-black">
-                        {money(product.price, cartCurrency)}
+                        {money(product.price, product.currency)}
                       </span>
                     </div>
                     <div className="mt-5 flex items-center justify-between">

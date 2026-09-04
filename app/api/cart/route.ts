@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { apiRateLimiter, getClientIp } from "../../lib/rate-limit";
 import { isShopifyConfigured, shopifyRequest } from "../../lib/shopify";
 import {
   hasCheckoutVerification,
@@ -46,10 +47,6 @@ const commandSchema = z.object({
   items: z.array(z.object({ variantId: z.string().min(1), quantity: z.number().int().min(1).max(20) })).min(1).max(10).optional(),
   variantId: z.string().min(1).optional(),
 });
-
-function buyerIp(request: NextRequest) {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || undefined;
-}
 
 function cartError(errors: Array<{ message: string }>) {
   if (errors.length) throw new Error(errors.map((error) => error.message).join(" "));
@@ -130,11 +127,21 @@ function responseForCart(cart: ShopifyCart, rememberCart = false) {
 
 export async function GET(request: NextRequest) {
   if (!isShopifyConfigured()) return NextResponse.json({ cart: null, error: "Shopify is not configured." }, { status: 503 });
+  const limit = apiRateLimiter.check(`cart-read:${getClientIp(request)}`, {
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many cart requests. Please try again shortly." },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
 
   try {
     const cartId = (await cookies()).get(CART_COOKIE)?.value;
     if (!cartId) return NextResponse.json({ cart: null }, { headers: { "Cache-Control": "no-store" } });
-    const cart = await fetchCart(cartId, buyerIp(request));
+    const cart = await fetchCart(cartId, getClientIp(request));
     if (!cart) return NextResponse.json({ cart: null }, { headers: { "Cache-Control": "no-store" } });
     return responseForCart(cart);
   } catch {
@@ -144,13 +151,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   if (!isShopifyConfigured()) return NextResponse.json({ error: "Shopify is not configured. Add .env.local first." }, { status: 503 });
+  const limit = apiRateLimiter.check(`cart-write:${getClientIp(request)}`, {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many cart changes. Please try again shortly." },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
 
-  const parsed = commandSchema.safeParse(await request.json());
+  const payload = await request.json().catch(() => null);
+  const parsed = commandSchema.safeParse(payload);
   if (!parsed.success) return NextResponse.json({ error: "Invalid cart request." }, { status: 400 });
 
   try {
     const cartId = (await cookies()).get(CART_COOKIE)?.value;
-    const ip = buyerIp(request);
+    const ip = getClientIp(request);
 
     if (parsed.data.action === "checkout") {
       if (!cartId) return NextResponse.json({ error: "Your cart is empty." }, { status: 422 });

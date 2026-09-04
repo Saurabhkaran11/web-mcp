@@ -6,20 +6,24 @@ import {
   TURNSTILE_VERIFICATION_COOKIE,
   verifyCheckoutTurnstile,
 } from "../../lib/turnstile";
+import { apiRateLimiter, getClientIp } from "../../lib/rate-limit";
 
 const tokenSchema = z.object({
   token: z.string().min(1).max(2048),
 });
 
-function buyerIp(request: NextRequest) {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    undefined
-  );
-}
-
 export async function POST(request: NextRequest) {
+  const limit = apiRateLimiter.check(`turnstile:${getClientIp(request)}`, {
+    limit: 10,
+    windowMs: 10 * 60_000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Too many verification attempts. Please try again shortly." },
+      { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
+
   if (!isTurnstileConfigured()) {
     return NextResponse.json(
       { error: "Checkout protection is not configured yet." },
@@ -33,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid verification response." }, { status: 400 });
   }
 
-  const verified = await verifyCheckoutTurnstile(parsed.data.token, buyerIp(request));
+  const verified = await verifyCheckoutTurnstile(parsed.data.token, getClientIp(request));
   if (!verified) {
     return NextResponse.json(
       { error: "Verification expired or could not be confirmed. Please try again." },
