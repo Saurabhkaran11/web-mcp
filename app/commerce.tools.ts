@@ -3,7 +3,7 @@ import { z } from "zod";
 
 export const searchInventoryContract = defineToolContract({
   name: "search_inventory",
-  description: "Search the live local storefront inventory by product, category, budget, and stock availability.",
+  description: "Search the current Shopify-backed local storefront inventory by product, category, budget, and stock availability.",
   kind: "read",
   input: z.object({
     query: z.string().optional().describe("Words to match in the product name or description."),
@@ -15,10 +15,12 @@ export const searchInventoryContract = defineToolContract({
 
 export const addToCartContract = defineToolContract({
   name: "add_to_cart",
-  description: "Add a live inventory item to the shopper's local cart and update the visible cart immediately.",
+  description: "Add a live Shopify inventory item to the shopper's shared cart and update the visible cart immediately.",
   kind: "write",
   input: z.object({
-    item_id: z.string().describe("The product ID returned by search_inventory."),
+    item_id: z
+      .string()
+      .describe("The exact Shopify variant ID in the id field returned by search_inventory (it starts gid://shopify/ProductVariant/)."),
     quantity: z.number().int().min(1).max(20).describe("Number of units to add."),
   }),
 });
@@ -35,14 +37,14 @@ export const removeFromCartContract = defineToolContract({
   description: "Remove an item (or reduce its quantity) from the shopper's cart and update the visible cart immediately.",
   kind: "write",
   input: z.object({
-    item_id: z.string().describe("The product ID of the cart line to remove."),
+    item_id: z.string().describe("The Shopify variant ID of the cart line to remove."),
     quantity: z.number().int().min(1).max(20).optional().describe("Units to remove. Omit to remove the entire line."),
   }),
 });
 
 export const checkoutContract = defineToolContract({
   name: "checkout",
-  description: "Place the order for everything currently in the cart. Requires explicit confirmation; returns an order ID the shopper can track with get_order_status.",
+  description: "Prepare a Shopify Checkout link for everything in the cart. Requires explicit confirmation and never submits a payment.",
   kind: "write",
   input: z.object({
     confirm: z.literal(true).describe("Must be true. Only pass after the shopper has approved the cart contents and total."),
@@ -51,7 +53,7 @@ export const checkoutContract = defineToolContract({
 
 export const orderStatusContract = defineToolContract({
   name: "get_order_status",
-  description: "Track a placed order in real time as it moves from packing to out-for-delivery to delivered.",
+  description: "Explain where a shopper can securely view Shopify order status after completing checkout.",
   kind: "read",
   input: z.object({
     order_id: z.string().optional().describe("Order ID from checkout. Omit to get the most recent order."),
