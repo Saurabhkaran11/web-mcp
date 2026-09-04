@@ -13,6 +13,7 @@ Local Loop makes online shopping simpler. Instead of clicking through filters an
 - Browse real products, prices, and available stock from Shopify.
 - Ask an agent to find an item within a budget.
 - Let the agent add items to the same cart shown on screen.
+- Build a shopping list, review live matches, then approve what goes into the cart.
 - Review the cart yourself before opening Shopify Checkout.
 - Pay only through Shopify. Local Loop never takes payment details.
 
@@ -44,6 +45,8 @@ Local Loop exposes seven WebMCP tools:
 4. In the **WebMCP – Model Context Tool Inspector**, confirm that all seven tools appear.
 5. Run `search_inventory`, then `add_to_cart`, and finally `get_cart`.
 6. Use `checkout` only to prepare the Shopify review page. Do not enter payment information for a demo.
+
+You can also use **Shopping List Mode** in the app. Enter one request per line, such as `1 honey under 15` or `2 cold brews under 12`, select **Review live matches**, then approve the matched items before they reach your cart.
 
 To enable the Chrome preview, turn on `chrome://flags/#enable-webmcp-testing` and relaunch Chrome.
 

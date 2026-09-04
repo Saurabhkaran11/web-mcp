@@ -42,6 +42,25 @@ type CartSnapshot = {
     line_total: number;
   }>;
 };
+type ShoppingListRequest = {
+  query: string;
+  quantity?: number;
+  max_price?: number;
+};
+type ShoppingListResult =
+  | {
+      query: string;
+      matched: true;
+      item: { id: string; title: string; price: number; quantity: number };
+    }
+  | { query: string; matched: false; message: string };
+type ShoppingListPlan = {
+  items: ShoppingListRequest[];
+  additions: Array<{ variantId: string; quantity: number }>;
+  results: ShoppingListResult[];
+  matched: number;
+  unmatched: number;
+};
 
 const money = (value: number, currency = "USD") =>
   new Intl.NumberFormat("en-US", { style: "currency", currency }).format(value);
@@ -50,6 +69,78 @@ function mapCart(snapshot: CartSnapshot | null) {
   return Object.fromEntries(
     (snapshot?.items ?? []).map((item) => [item.variant_id, item.quantity]),
   );
+}
+
+function parseShoppingListInput(input: string): ShoppingListRequest[] {
+  return input
+    .split(/\n|;/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 10)
+    .flatMap((line) => {
+      const quantityMatch = line.match(/^([1-9]\d?)\s*(?:x|×)?\s*/i);
+      const priceMatch = line.match(
+        /\b(?:under|below|max(?:imum)?|less than)\s*\$?(\d+(?:\.\d+)?)/i,
+      );
+      const query = line
+        .replace(/^(\d{1,2})\s*(?:x|×)?\s*/i, "")
+        .replace(
+          /\b(?:under|below|max(?:imum)?|less than)\s*\$?\d+(?:\.\d+)?/i,
+          "",
+        )
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!query) return [];
+      return [{
+        query,
+        quantity: quantityMatch ? Math.min(20, Number(quantityMatch[1])) : 1,
+        max_price: priceMatch ? Number(priceMatch[1]) : undefined,
+      }];
+    });
+}
+
+function makeShoppingListPlan(
+  products: Product[],
+  cart: Cart,
+  items: ShoppingListRequest[],
+): ShoppingListPlan {
+  const plannedQuantities = new Map<string, number>();
+  const additions: Array<{ variantId: string; quantity: number }> = [];
+  const results = items.map(({ query, quantity = 1, max_price }) => {
+    const wanted = query.toLowerCase();
+    const match = products.reduce<Product | undefined>((best, product) => {
+      const matches =
+        `${product.title} ${product.description}`.toLowerCase().includes(wanted) &&
+        (max_price === undefined || product.price <= max_price) &&
+        product.stock >=
+          (cart[product.id] ?? 0) + (plannedQuantities.get(product.id) ?? 0) + quantity;
+      if (!matches) return best;
+      return !best || product.price < best.price ? product : best;
+    }, undefined);
+
+    if (!match) {
+      return {
+        query,
+        matched: false as const,
+        message: "No in-stock match within budget.",
+      };
+    }
+
+    plannedQuantities.set(
+      match.id,
+      (plannedQuantities.get(match.id) ?? 0) + quantity,
+    );
+    additions.push({ variantId: match.id, quantity });
+    return {
+      query,
+      matched: true as const,
+      item: { id: match.id, title: match.title, price: match.price, quantity },
+    };
+  });
+
+  const matched = results.filter((result) => result.matched).length;
+  return { items, additions, results, matched, unmatched: items.length - matched };
 }
 
 export default function Home() {
@@ -70,6 +161,9 @@ export default function Home() {
   const [cartCurrency, setCartCurrency] = useState("USD");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
+  const [shoppingListInput, setShoppingListInput] = useState("");
+  const [shoppingListPlan, setShoppingListPlan] = useState<ShoppingListPlan | null>(null);
+  const [shoppingListBusy, setShoppingListBusy] = useState(false);
 
   const refreshInventory = useCallback(async () => {
     try {
@@ -337,11 +431,16 @@ export default function Home() {
     [],
   );
 
+  const buildShoppingListPlan = useCallback(
+    (items: ShoppingListRequest[]) => makeShoppingListPlan(products, cart, items),
+    [cart, products],
+  );
+
   const fulfillShoppingList = useCallback(
     async ({
       items,
     }: {
-      items: { query: string; quantity?: number; max_price?: number }[];
+      items: ShoppingListRequest[];
     }) => {
       if (!products.length) {
         return {
@@ -360,51 +459,25 @@ export default function Home() {
         };
       }
 
-      const additions: Array<{ variantId: string; quantity: number }> = [];
-      const results = items.map(({ query: wanted, quantity = 1, max_price }) => {
-        const match = products.find(
-          (item) =>
-            `${item.title} ${item.description}`
-              .toLowerCase()
-              .includes(wanted.toLowerCase()) &&
-            (max_price === undefined || item.price <= max_price) &&
-            item.stock >= (cart[item.id] ?? 0) + quantity,
-        );
-        if (!match) {
-          return {
-            query: wanted,
-            matched: false as const,
-            message: "No in-stock match within budget.",
-          };
-        }
-
-        additions.push({ variantId: match.id, quantity });
-        return {
-          query: wanted,
-          matched: true as const,
-          item: {
-            id: match.id,
-            title: match.title,
-            price: match.price,
-            quantity,
-          },
-        };
-      });
+      const plan = buildShoppingListPlan(items);
 
       try {
-        if (additions.length) await updateCart({ action: "add", items: additions });
-        const matchedCount = results.filter((item) => item.matched).length;
+        if (plan.additions.length) {
+          await updateCart({ action: "add", items: plan.additions });
+        }
         setAgentMessage(
-          `Shopping list: matched ${matchedCount} of ${items.length} items in Shopify.`,
+          `Shopping list: added ${plan.matched} of ${items.length} requested item${
+            items.length === 1 ? "" : "s"
+          } to the Shopify cart.`,
         );
         return {
-          results,
-          matched: matchedCount,
-          unmatched: items.length - matchedCount,
+          results: plan.results,
+          matched: plan.matched,
+          unmatched: plan.unmatched,
         };
       } catch (error) {
         return {
-          results,
+          results: plan.results,
           matched: 0,
           unmatched: items.length,
           message:
@@ -414,8 +487,48 @@ export default function Home() {
         };
       }
     },
-    [cart, inventorySource, products, updateCart],
+    [buildShoppingListPlan, inventorySource, products.length, updateCart],
   );
+
+  const previewShoppingList = useCallback(() => {
+    const items = parseShoppingListInput(shoppingListInput);
+    if (!items.length) {
+      setShoppingListPlan(null);
+      setAgentMessage(
+        "Add one item per line, such as “1 honey under 15”.",
+      );
+      return;
+    }
+    if (!products.length) {
+      setAgentMessage("Inventory is still syncing. Please try again shortly.");
+      return;
+    }
+
+    const plan = buildShoppingListPlan(items);
+    setShoppingListPlan(plan);
+    setAgentMessage(
+      plan.matched
+        ? `Shopping list ready: review ${plan.matched} live match${
+            plan.matched === 1 ? "" : "es"
+          } below. Nothing has been added yet.`
+        : "No live Shopify matches were found for that list.",
+    );
+  }, [buildShoppingListPlan, products.length, shoppingListInput]);
+
+  const approveShoppingList = useCallback(async () => {
+    if (!shoppingListPlan?.additions.length) return;
+
+    setShoppingListBusy(true);
+    try {
+      const result = await fulfillShoppingList({ items: shoppingListPlan.items });
+      if (result.matched) {
+        setShoppingListPlan(null);
+        setShoppingListInput("");
+      }
+    } finally {
+      setShoppingListBusy(false);
+    }
+  }, [fulfillShoppingList, shoppingListPlan]);
 
   const runDemoAssistant = useCallback(
     async (requestedText?: string) => {
@@ -679,6 +792,107 @@ export default function Home() {
                 {suggestion}
               </button>
             ))}
+          </div>
+
+          <div className="mt-7 border-t border-[#174b36]/10 pt-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[.2em] text-[#e15b35]">
+                  Shopping list mode
+                </p>
+                <h3 className="mt-2 text-xl font-black tracking-tight">
+                  Plan the list first. Add only after you approve.
+                </h3>
+              </div>
+              <p className="max-w-md text-sm leading-5 text-[#174b36]/60">
+                Add one request per line, such as “1 honey under 15” or “2 cold brews under 12”.
+              </p>
+            </div>
+
+            <form
+              className="mt-4 flex flex-col gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                previewShoppingList();
+              }}
+            >
+              <label className="sr-only" htmlFor="shopping-list-request">
+                Shopping list
+              </label>
+              <textarea
+                id="shopping-list-request"
+                value={shoppingListInput}
+                onChange={(event) => setShoppingListInput(event.target.value)}
+                placeholder={"1 honey under 15\n2 cold brews under 12"}
+                rows={3}
+                className="min-h-28 w-full rounded-2xl border border-[#174b36]/15 bg-[#f8f7f2] px-5 py-4 text-sm outline-none placeholder:text-[#174b36]/40 focus:border-[#e15b35]"
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled={!shoppingListInput.trim() || !products.length || shoppingListBusy}
+                  className="rounded-full bg-[#174b36] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#e15b35] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Review live matches
+                </button>
+                <span className="text-xs text-[#174b36]/55">
+                  Reviewing never changes your cart.
+                </span>
+              </div>
+            </form>
+
+            {shoppingListPlan ? (
+              <div
+                aria-live="polite"
+                className="mt-5 rounded-2xl border border-[#174b36]/10 bg-[#f8f7f2] p-4"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black">
+                      {shoppingListPlan.matched} of {shoppingListPlan.items.length} request
+                      {shoppingListPlan.items.length === 1 ? "" : "s"} matched
+                    </p>
+                    <p className="mt-1 text-xs text-[#174b36]/60">
+                      Only the matches below will be added after your approval.
+                    </p>
+                  </div>
+                  {shoppingListPlan.additions.length ? (
+                    <button
+                      type="button"
+                      onClick={() => void approveShoppingList()}
+                      disabled={shoppingListBusy}
+                      className="rounded-full bg-[#e15b35] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#174b36] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {shoppingListBusy ? "Adding…" : "Add matched items to cart"}
+                    </button>
+                  ) : null}
+                </div>
+
+                <ul className="mt-4 space-y-2 text-sm">
+                  {shoppingListPlan.results.map((result, index) => (
+                    <li
+                      key={`${result.query}-${index}`}
+                      className="flex flex-wrap items-center justify-between gap-2 border-t border-[#174b36]/10 pt-2 first:border-0 first:pt-0"
+                    >
+                      <span className="font-semibold">
+                        {result.matched
+                          ? `${result.item.quantity} × ${result.item.title}`
+                          : result.query}
+                      </span>
+                      <span
+                        className={
+                          result.matched ? "text-[#174b36]/70" : "text-[#a03b20]"
+                        }
+                      >
+                        {result.matched
+                          ? `${money(result.item.price, cartCurrency)} each`
+                          : result.message}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
